@@ -1,0 +1,61 @@
+%% Data Plane: End-to-End Pipeline with Security and Governance Controls
+
+flowchart LR
+  %% =========================
+  %% AZURE DATA PLANE
+  %% =========================
+  subgraph Azure["Azure Data Plane"]
+    BLOB[(Azure Blob Storage\nlanding/encrypted/*.parquet.enc)]
+    KV[(Azure Key Vault\nCMK + Secrets)]
+    AF[Airflow on AKS/VM\nDAG Orchestration]
+    CMP[Secure Compute Boundary\nAzure Function / Databricks Job]
+    QZ[(Quarantine Zone\nbad files/records)]
+    DZ[(Decrypted Short-Lived Zone\nraw/decrypted/ TTL)]
+  end
+
+  %% =========================
+  %% SNOWFLAKE DATA PLATFORM
+  %% =========================
+  subgraph Snowflake["Snowflake Data Platform"]
+    STG[(External/Internal Stage)]
+    RAW[(RAW schema\nimmutable loads)]
+    SIL[(SILVER schema\nstaging/standardised)]
+    GOLD[(GOLD schema\nfacts/dims/data products)]
+    SEM[(SEMANTIC schema\nmetrics/views)]
+    BI[BI Layer\nPower BI / Tableau]
+  end
+
+  %% =========================
+  %% MAIN FLOW
+  %% =========================
+  BLOB -->|1 File lands| AF
+  AF -->|2 Validate name + checksum| AF
+  AF -->|3 Fetch key handle\nno plaintext keys| KV
+  AF -->|4 Trigger decrypt job| CMP
+  CMP -->|5 Read encrypted| BLOB
+  CMP -->|6 Decrypt in memory/temp\nno long-lived plaintext| DZ
+  CMP -->|7 On decrypt/parse failure| QZ
+  AF -->|8 COPY INTO / load| STG
+  DZ -->|9 Stage reference| STG
+  STG -->|10 COPY INTO raw| RAW
+
+  RAW -->|11 dbt: stg/int| SIL
+  SIL -->|12 dbt: marts| GOLD
+  GOLD -->|13 semantic models| SEM
+  SEM -->|14 governed consumption| BI
+
+  %% Optional backfeed for issue handling
+  SIL -->|DQ failures route| QZ
+
+  %% =========================
+  %% STYLING
+  %% =========================
+  classDef azure fill:#0078D4,stroke:#003366,stroke-width:2px,color:#fff
+  classDef snowflake fill:#29B5E8,stroke:#1A7A9E,stroke-width:2px,color:#fff
+  classDef security fill:#FF6B6B,stroke:#C92A2A,stroke-width:2px,color:#fff
+  classDef compute fill:#51CF66,stroke:#2B8A3E,stroke-width:2px,color:#fff
+
+  class BLOB,KV,AF,DZ azure
+  class STG,RAW,SIL,GOLD,SEM,BI snowflake
+  class QZ security
+  class CMP compute

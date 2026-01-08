@@ -1,0 +1,45 @@
+version: 2
+
+models:
+  - name: silver_customers
+    description: Cleaned and standardized customer data
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - customer_id
+    columns:
+      - name: customer_id
+        description: Unique customer identifier (primary key)
+        tests:
+          - unique
+          - not_null
+      - name: email
+        description: Cleaned and lowercase email
+      - name: change_type
+        description: CDC action applied to this row
+      - name: change_timestamp
+        description: Timestamp of the most recent change applied to the customer
+      - name: lifecycle_state
+        description: Derived lifecycle flag (active/inactive/deactivated) for analytics
+      - name: data_quality_flag
+        description: Data quality issues found
+
+  - name: silver_orders
+    description: Cleaned and standardized order data
+    columns:
+      - name: order_id
+        description: Unique order identifier
+        tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: Customer who placed the order
+        tests:
+          - not_null
+          - relationships:
+              to: ref('silver_customers')
+              field: customer_id
+      - name: order_amount
+        description: Order total (validated >= 0)
+        tests:
+          - not_null

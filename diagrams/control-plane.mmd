@@ -1,0 +1,60 @@
+%% Control Plane: Implicit Conditions and Governance Controls
+
+flowchart TB
+  %% =========================
+  %% CONTROL PLANE (Implicit Conditions)
+  %% =========================
+
+  subgraph Controls["Implicit Conditions / Control Plane (Audit-Ready)"]
+    direction TB
+
+    C1["<b>1. Data Sensitivity & Exposure</b><br/>• PII classification<br/>• Default masking<br/>• Least privilege"]
+    C2["<b>2. Idempotency & Duplicates</b><br/>• file_hash + batch_id<br/>• control table<br/>• dedupe strategy"]
+    C3["<b>3. Time Semantics</b><br/>• event_time vs ingest_time<br/>• late arrivals<br/>• backfill policy"]
+    C4["<b>4. Failure Modes & Recovery</b><br/>• quarantine<br/>• retries<br/>• replay by batch_id"]
+    C5["<b>5. Auditability & Reproducibility</b><br/>• lineage (dbt artifacts)<br/>• versioned logic<br/>• run_id traceability"]
+    C6["<b>6. Key & Secret Management</b><br/>• Key Vault<br/>• rotation<br/>• no secrets in DAG"]
+    C7["<b>7. Access & Governance</b><br/>• Snowflake RBAC<br/>• masking/row policies<br/>• access history"]
+    C8["<b>8. Change & Evolution</b><br/>• schema contracts<br/>• on_schema_change<br/>• deprecation/versioning"]
+    C9["<b>9. Operational Observability</b><br/>• SLA/alerts<br/>• row counts<br/>• freshness tests<br/>• cost/credits monitoring"]
+  end
+
+  %% =========================
+  %% PIPELINE COMPONENTS
+  %% =========================
+
+  subgraph Components["Pipeline Components"]
+    KVA[Key Vault Usage]
+    PII[PII Handling Points<br/>SIL/GOLD/SEM/BI]
+    IDEMP[Ingestion Control<br/>Airflow + RAW]
+    TIME[Silver/Gold Modeling]
+    REC[Quarantine + Replay]
+    AUD[dbt + Airflow Metadata]
+    RBAC[Snowflake Roles/Policies]
+    SCHEMA[Schema Evolution<br/>raw → stg]
+    OBS[Monitoring<br/>Airflow/Snowflake/Azure]
+  end
+
+  %% =========================
+  %% CONTROL ATTACHMENTS
+  %% =========================
+
+  C6 -->|applies to| KVA
+  C1 -->|applies to| PII
+  C2 -->|applies to| IDEMP
+  C3 -->|applies to| TIME
+  C4 -->|applies to| REC
+  C5 -->|applies to| AUD
+  C7 -->|applies to| RBAC
+  C8 -->|applies to| SCHEMA
+  C9 -->|applies to| OBS
+
+  %% =========================
+  %% STYLING
+  %% =========================
+
+  classDef condition fill:#FFF3BF,stroke:#FFA94D,stroke-width:2px,color:#333
+  classDef component fill:#D0EBFF,stroke:#4C6EF5,stroke-width:2px,color:#000
+
+  class C1,C2,C3,C4,C5,C6,C7,C8,C9 condition
+  class KVA,PII,IDEMP,TIME,REC,AUD,RBAC,SCHEMA,OBS component

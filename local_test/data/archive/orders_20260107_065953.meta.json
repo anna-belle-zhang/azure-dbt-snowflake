@@ -1,0 +1,20 @@
+{
+  "batch_id": "batch_20260107_070012",
+  "run_id": "2026-01-07T07:00:12.268659",
+  "source_file": "orders_20260107_065953.parquet.encrypted",
+  "decrypted_file": "orders_20260107_065953.parquet",
+  "file_hash": "1bea294c4820c341883f0b37652697f85ab05e393b971bbf2a1ff8476701d780",
+  "row_count": 5000,
+  "schema": [
+    "order_id",
+    "customer_id",
+    "order_date",
+    "order_timestamp",
+    "order_status",
+    "order_amount",
+    "currency",
+    "payment_method"
+  ],
+  "decryption_timestamp": "2026-01-07T07:00:12.166766",
+  "status": "ready_for_load"
+}

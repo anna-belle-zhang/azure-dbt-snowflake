@@ -1,0 +1,52 @@
+name: local_pipeline
+version: 1.0.0
+config-version: 2
+
+profile: local_pipeline
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+clean-targets:
+  - target
+  - dbt_packages
+  - dbt_modules
+
+vars:
+  batch_id: "{{ env_var('AIRFLOW_RUN_ID', 'manual_run') }}"
+  execution_date: "{{ env_var('AIRFLOW_EXECUTION_DATE', modules.datetime.datetime.now().strftime('%Y-%m-%d')) }}"
+
+models:
+  local_pipeline:
+    # persist_docs disabled for MySQL compatibility
+    # +persist_docs:
+    #   relation: true
+    #   columns: true
+
+    bronze:
+      +materialized: table
+      +tags: ["bronze", "raw"]
+      +meta:
+        layer: bronze
+
+    silver:
+      +materialized: table
+      +tags: ["silver", "cleaned"]
+      +meta:
+        layer: silver
+
+    gold:
+      +materialized: table
+      +tags: ["gold", "dimensional"]
+      +meta:
+        layer: gold
+
+    semantic:
+      +materialized: view
+      +tags: ["semantic", "metrics"]
+      +meta:
+        layer: semantic

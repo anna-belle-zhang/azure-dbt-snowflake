@@ -1,0 +1,61 @@
+version: 2
+
+models:
+  - name: dim_customers
+    description: Customer dimension for analytics
+    columns:
+      - name: customer_id
+        description: Customer business key
+        tests:
+          - unique
+          - not_null
+      - name: change_type
+        description: Latest CDC action associated with this customer
+      - name: change_timestamp
+        description: Timestamp of the most recent change event
+      - name: lifecycle_state
+        description: Lifecycle flag (active/inactive/deactivated) cascaded from silver layer
+      - name: customer_status
+        description: Human-readable lifecycle bucket (Active, Inactive, Former Customer)
+
+  - name: fact_orders
+    description: Orders fact table with customer denormalization
+    columns:
+      - name: order_id
+        description: Order business key
+        tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: FK to dim_customers
+        tests:
+          - relationships:
+              to: ref('dim_customers')
+              field: customer_id
+      - name: order_amount
+        description: Order amount (validated)
+
+  - name: dim_customers_scd2
+    description: Type 2 customer dimension preserving historical changes
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - customer_id
+            - valid_from
+    columns:
+      - name: customer_id
+        description: Customer business key
+        tests:
+          - not_null
+      - name: valid_from
+        description: Timestamp when this version became effective
+        tests:
+          - not_null
+      - name: valid_to
+        description: Timestamp when this version expired (9999-12-31 for current records)
+      - name: is_current
+        description: Indicates whether this is the active version
+      - name: change_type
+        description: Source CDC action that produced this row
+      - name: customer_status
+        description: Derived lifecycle bucket for reporting

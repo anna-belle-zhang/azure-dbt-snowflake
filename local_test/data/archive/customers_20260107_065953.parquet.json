@@ -1,0 +1,9 @@
+{
+  "original_filename": "customers_20260107_065953.parquet",
+  "encrypted_filename": "customers_20260107_065953.parquet.encrypted",
+  "file_hash_sha256": "eba9c1557ffa338495340b76abc2b0b97e47696f0d2376e43c9b491937395cb7",
+  "original_size_bytes": 36223,
+  "encrypted_size_bytes": 48376,
+  "encryption_timestamp": "2026-01-07T06:59:58.514116",
+  "encryption_method": "Fernet (AES-128)"
+}

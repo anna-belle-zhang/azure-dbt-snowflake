@@ -1,0 +1,21 @@
+# Python dependencies for local testing
+
+# Data processing
+pandas>=2.0.0
+pyarrow>=12.0.0
+numpy>=1.24.0
+
+# Encryption
+cryptography>=41.0.0
+
+# Database
+sqlalchemy>=2.0.0
+pymysql>=1.1.0
+
+# dbt
+dbt-core>=1.7.0
+dbt-mysql>=1.7.0
+logbook<1.7  # pin to avoid dbt tracking buffer_size error (dbt-utils is installed via `dbt deps`)
+
+# Airflow providers (if running locally)
+apache-airflow-providers-mysql>=5.0.0

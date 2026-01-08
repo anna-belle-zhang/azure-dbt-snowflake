@@ -1,0 +1,24 @@
+local_pipeline:
+  target: dev
+  outputs:
+    dev:
+      type: mysql
+      host: "{{ env_var('LOCAL_MYSQL_HOST', 'openmetadata_mysql') }}"
+      port: "{{ env_var('LOCAL_MYSQL_PORT', '3306') | int }}"
+      user: "{{ env_var('LOCAL_MYSQL_USER', 'nocodb') }}"
+      password: "{{ env_var('LOCAL_MYSQL_PASSWORD', 'nocodb123') }}"
+      database: nocodb_db
+      schema: nocodb_db
+      threads: 4
+      keepalives_idle: 0
+
+    prod:
+      type: mysql
+      host: "{{ env_var('LOCAL_MYSQL_HOST', 'openmetadata_mysql') }}"
+      port: "{{ env_var('LOCAL_MYSQL_PORT', '3306') | int }}"
+      user: "{{ env_var('LOCAL_MYSQL_USER', 'nocodb') }}"
+      password: "{{ env_var('LOCAL_MYSQL_PASSWORD', 'nocodb123') }}"
+      database: bronze_db
+      schema: bronze_db
+      threads: 4
+      keepalives_idle: 0

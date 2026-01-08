@@ -1,0 +1,61 @@
+version: 2
+
+sources:
+  - name: bronze_source
+    database: bronze_db
+    schema: bronze_db
+    tables:
+      - name: customers_raw
+        description: Raw decrypted customer records landed by Airflow
+      - name: orders_raw
+        description: Raw decrypted order records landed by Airflow
+
+models:
+  - name: bronze_customers
+    description: Snapshot of decrypted customers with batch metadata
+    columns:
+      - name: customer_id
+        tests:
+          - not_null
+      - name: batch_id
+        tests:
+          - not_null
+
+  - name: bronze_orders
+    description: Snapshot of decrypted orders with batch metadata
+    columns:
+      - name: order_id
+        tests:
+          - not_null
+
+  - name: silver_customers
+    description: Deduplicated and cleansed customers
+    tests:
+      - unique:
+          column_name: customer_id
+
+  - name: silver_orders
+    description: Cleansed orders joined to customers
+    columns:
+      - name: order_amount
+        tests:
+          - not_null
+
+  - name: dim_customers
+    description: Gold dimension table for customer details
+    columns:
+      - name: customer_id
+        tests:
+          - unique
+          - not_null
+
+  - name: fct_orders
+    description: Gold fact capturing monetary activity
+    columns:
+      - name: order_id
+        tests:
+          - unique
+          - not_null
+
+  - name: order_metrics
+    description: Semantic layer metrics for BI consumption

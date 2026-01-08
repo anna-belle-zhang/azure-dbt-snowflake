@@ -1,0 +1,47 @@
+version: 2
+
+sources:
+  - name: parquet_files
+    description: Parquet files loaded from encrypted source
+    tables:
+      - name: customers
+        description: Raw customer data
+      - name: orders
+        description: Raw order data
+
+models:
+  - name: bronze_customers
+    description: Bronze layer customer data (immutable)
+    columns:
+      - name: customer_id
+        description: Unique customer identifier
+        tests:
+          - not_null:
+              severity: warn  # Bronze accepts raw data; warn about quality issues
+      - name: email
+        description: Customer email address
+      - name: change_type
+        description: CDC operation type (insert/update/deactivate)
+        tests:
+          - not_null
+      - name: effective_at
+        description: Source-provided effective timestamp for the change event
+      - name: batch_id
+        description: Airflow batch ID for traceability
+      - name: ingestion_timestamp
+        description: When data was loaded to bronze
+
+  - name: bronze_orders
+    description: Bronze layer order data (immutable)
+    columns:
+      - name: order_id
+        description: Unique order identifier
+        tests:
+          - not_null:
+              severity: warn  # Bronze accepts raw data; warn about quality issues
+      - name: customer_id
+        description: Reference to customer
+      - name: order_amount
+        description: Order total amount
+      - name: batch_id
+        description: Airflow batch ID for traceability

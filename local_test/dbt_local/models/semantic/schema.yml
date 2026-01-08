@@ -1,0 +1,18 @@
+version: 2
+
+models:
+  - name: customer_snapshot_daily
+    description: Daily summary of customer inserts/updates/deactivations with running active count estimates.
+    columns:
+      - name: event_date
+        description: Calendar date associated with the CDC events.
+        tests:
+          - not_null
+      - name: customers_inserted
+        description: Count of customer insert events on the date.
+      - name: customers_updated
+        description: Count of customer profile updates on the date.
+      - name: customers_deactivated
+        description: Count of customer deactivation events on the date.
+      - name: active_customers_estimate
+        description: Running sum of net change (insert - deactivate) for quick attrition tracking.
