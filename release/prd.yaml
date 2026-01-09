@@ -1,0 +1,55 @@
+env: prd
+deployment_mode: manual
+require_multiple_approvers: true
+minimum_approvers: 2
+
+# CRITICAL: Must match UAT-tested release tag
+image_version: rel-2026-01-09-1
+dbt_image: dbt-runner:rel-2026-01-09-1
+
+snowflake:
+  account: sf-prd.west-europe.azure
+  database: DBT_MODELS_PRD
+  warehouse: COMPUTE_WH_PRD
+  role: DBT_PRD_ROLE
+  user: DBT_PRD_USER
+  certificate_secret_name: snowflake-certificate-prd
+
+azure:
+  location: West Europe
+  resource_group: az-euw-syn-prd-pract-dbt-rg01
+  acr_name: dbtjobsprd
+  acr_sku: Standard
+  keyvault_name: secrets-aci-prd
+  keyvault_sku: premium
+  soft_delete_retention_days: 90
+  purge_protection_enabled: true
+  storage_account_name: azeuwsynprdstategsa01
+  storage_container_name: az-euw-syn-prd-tfstate-container01
+  baseline_state_key: dbt_prd_baseline.terraform.tfstate
+  infra_state_key: dbt_prd_infra.terraform.tfstate
+
+aci:
+  name: dbt-job-prd
+  cpu: 2.0
+  memory: 4
+  restart_policy: Never
+
+dbt:
+  target: prd
+  threads: 16
+  certificate_path: /snowflake_dbt.pem
+
+data_refresh:
+  uat_full_mask_from_prd: true
+  full_refresh: false
+
+tags:
+  provider: az
+  region: euw
+  enterprise: syn
+  account: prd
+  environment: prd
+  managed_by: terraform
+  deployment_type: trunk-based
+  compliance: APRA-CPS-234

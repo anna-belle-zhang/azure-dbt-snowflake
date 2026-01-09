@@ -1,0 +1,53 @@
+env: dev
+deployment_mode: auto
+
+# Dev always uses 'latest' for fast feedback
+image_version: latest
+dbt_image: dbt-runner:latest
+
+snowflake:
+  account: sf-dev.west-europe.azure
+  database: DBT_MODELS_DEV
+  warehouse: COMPUTE_WH_DEV
+  role: DBT_DEV_ROLE
+  user: DBT_DEV_USER
+  certificate_secret_name: snowflake-certificate-dev
+
+azure:
+  location: West Europe
+  resource_group: az-euw-syn-dev-pract-dbt-rg01
+  acr_name: dbtjobsdev
+  acr_sku: Basic
+  keyvault_name: secrets-aci-dev
+  keyvault_sku: standard
+  soft_delete_retention_days: 7
+  purge_protection_enabled: false
+  storage_account_name: azeuwsyndevstategsa01
+  storage_container_name: az-euw-syn-dev-tfstate-container01
+  baseline_state_key: dbt_dev_baseline.terraform.tfstate
+  infra_state_key: dbt_dev_infra.terraform.tfstate
+
+aci:
+  name: dbt-job-dev
+  cpu: 0.5
+  memory: 1
+  restart_policy: Never
+
+dbt:
+  target: dev
+  threads: 4
+  certificate_path: /snowflake_dbt.pem
+
+data_refresh:
+  dev_sample_from_uat: true
+  sample_percentage: 10
+  full_refresh: false
+
+tags:
+  provider: az
+  region: euw
+  enterprise: syn
+  account: dev
+  environment: dev
+  managed_by: terraform
+  deployment_type: trunk-based

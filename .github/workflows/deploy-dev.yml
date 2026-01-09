@@ -1,0 +1,174 @@
+name: Deploy to DEV
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'tpch_transform/**'
+      - 'infra-dev/**'
+      - 'baseline-dev/**'
+      - 'release/dev.yaml'
+
+env:
+  ARM_CLIENT_ID: "${{ secrets.AZURE_CLIENT_ID }}"
+  ARM_CLIENT_SECRET: "${{ secrets.AZURE_CLIENT_SECRET }}"
+  ARM_SUBSCRIPTION_ID: "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+  ARM_TENANT_ID: "${{ secrets.AZURE_TENANT_ID }}"
+
+jobs:
+  load-config:
+    name: Load DEV Configuration
+    runs-on: ubuntu-latest
+    outputs:
+      acr_name: ${{ steps.parse.outputs.acr_name }}
+      keyvault_url: ${{ steps.parse.outputs.keyvault_url }}
+      cert_secret_name: ${{ steps.parse.outputs.cert_secret_name }}
+      dbt_target: ${{ steps.parse.outputs.dbt_target }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse release/dev.yaml
+        id: parse
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+          echo "acr_name=$(yq '.azure.acr_name' release/dev.yaml)" >> $GITHUB_OUTPUT
+          echo "dbt_target=$(yq '.dbt.target' release/dev.yaml)" >> $GITHUB_OUTPUT
+          echo "keyvault_url=https://$(yq '.azure.keyvault_name' release/dev.yaml).vault.azure.net" >> $GITHUB_OUTPUT
+          echo "cert_secret_name=$(yq '.snowflake.certificate_secret_name' release/dev.yaml)" >> $GITHUB_OUTPUT
+
+  build-and-push:
+    name: Build and Push Docker Image
+    needs: load-config
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login via Azure CLI
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Docker Login to ACR
+        uses: azure/docker-login@v1
+        with:
+          login-server: ${{ needs.load-config.outputs.acr_name }}.azurecr.io
+          username: ${{ secrets.REGISTRY_USERNAME_DEV }}
+          password: ${{ secrets.REGISTRY_PASSWORD_DEV }}
+
+      - name: Build Docker Image
+        working-directory: ./tpch_transform
+        run: |
+          docker build --platform linux/amd64 \
+            -t ${{ needs.load-config.outputs.acr_name }}.azurecr.io/dbt/tpch_transform:${{ github.sha }} \
+            -t ${{ needs.load-config.outputs.acr_name }}.azurecr.io/dbt/tpch_transform:latest \
+            .
+
+      - name: Push Docker Images
+        run: |
+          docker push ${{ needs.load-config.outputs.acr_name }}.azurecr.io/dbt/tpch_transform:${{ github.sha }}
+          docker push ${{ needs.load-config.outputs.acr_name }}.azurecr.io/dbt/tpch_transform:latest
+
+      - name: Create Build Manifest
+        run: |
+          cat > build-manifest.json <<EOF
+          {
+            "git_sha": "${{ github.sha }}",
+            "git_ref": "${{ github.ref }}",
+            "build_timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "image_tags": [
+              "${{ github.sha }}",
+              "latest"
+            ],
+            "acr_repository": "${{ needs.load-config.outputs.acr_name }}.azurecr.io/dbt/tpch_transform",
+            "built_by": "${{ github.actor }}",
+            "environment": "dev"
+          }
+          EOF
+          cat build-manifest.json
+
+      - name: Upload Build Manifest
+        uses: actions/upload-artifact@v3
+        with:
+          name: build-manifest-dev
+          path: build-manifest.json
+
+  terraform-apply:
+    name: Terraform Apply - DEV Infra
+    needs: [load-config, build-and-push]
+    runs-on: ubuntu-latest
+    environment: dev
+    env:
+      ARM_SKIP_PROVIDER_REGISTRATION: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.2.9"
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: ./infra-dev
+
+      - name: Terraform Plan
+        run: |
+          terraform plan \
+            -var='image_version=${{ github.sha }}' \
+            -var='dbt_target=${{ needs.load-config.outputs.dbt_target }}' \
+            -var='keyvault_url=${{ needs.load-config.outputs.keyvault_url }}' \
+            -var='cert_secret_name=${{ needs.load-config.outputs.cert_secret_name }}' \
+            -out=tfplan
+        working-directory: ./infra-dev
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
+        working-directory: ./infra-dev
+
+      - name: Create Deployment Record
+        run: |
+          cat > deployment-record.json <<EOF
+          {
+            "environment": "dev",
+            "deployed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "git_sha": "${{ github.sha }}",
+            "deployed_by": "${{ github.actor }}",
+            "image_version": "${{ github.sha }}",
+            "release_config": "release/dev.yaml",
+            "terraform_version": "1.2.9",
+            "approval_required": false
+          }
+          EOF
+          cat deployment-record.json
+
+      - name: Upload Deployment Record
+        uses: actions/upload-artifact@v3
+        with:
+          name: deployment-record-dev-${{ github.sha }}
+          path: deployment-record.json
+
+  notify:
+    name: Notify Deployment
+    needs: [terraform-apply]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Deployment Success
+        if: success()
+        run: |
+          echo "✅ DEV deployment successful"
+          echo "Commit: ${{ github.sha }}"
+          echo "Deployed by: ${{ github.actor }}"
+
+      - name: Deployment Failure
+        if: failure()
+        run: |
+          echo "❌ DEV deployment failed"
+          echo "Commit: ${{ github.sha }}"
+          echo "Check logs for details"

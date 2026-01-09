@@ -1,30 +1,63 @@
 tpch_transform:
-  target: dev
+  target: "{{ env_var('DBT_TARGET', 'dev') }}"
   outputs:
     dev:
       type: snowflake
-      account: so85363.west-europe.azure
-
-      user: LUCAS
-      private_key_path: /Users/lucas/.ssh/snowflake_dbt.p8
-
-      role: ACCOUNTADMIN
-      database: DBT_MODELS
-      warehouse: COMPUTE_WH
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT', 'sf-dev.west-europe.azure') }}"
+      user: "{{ env_var('SNOWFLAKE_USER', 'DBT_DEV_USER') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE', 'DBT_DEV_ROLE') }}"
+      database: "{{ env_var('SNOWFLAKE_DATABASE', 'DBT_MODELS_DEV') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'COMPUTE_WH_DEV') }}"
       schema: staging
+      private_key_path: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PATH', '~/.ssh/snowflake_dbt.p8') }}"
+      threads: 4
       client_session_keep_alive: False
       connect_retries: 0
       connect_timeout: 10
       retry_on_database_errors: False
-      retry_all: False 
+      retry_all: False
       reuse_connections: False
+
+    uat:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT', 'sf-uat.west-europe.azure') }}"
+      user: "{{ env_var('SNOWFLAKE_USER', 'DBT_UAT_USER') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE', 'DBT_UAT_ROLE') }}"
+      database: "{{ env_var('SNOWFLAKE_DATABASE', 'DBT_MODELS_UAT') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'COMPUTE_WH_UAT') }}"
+      schema: staging
+      private_key_path: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PATH', '/snowflake_dbt.pem') }}"
+      threads: 8
+      client_session_keep_alive: False
+      connect_retries: 2
+      connect_timeout: 30
+      retry_on_database_errors: True
+      retry_all: False
+      reuse_connections: False
+
+    prd:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT', 'sf-prd.west-europe.azure') }}"
+      user: "{{ env_var('SNOWFLAKE_USER', 'DBT_PRD_USER') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE', 'DBT_PRD_ROLE') }}"
+      database: "{{ env_var('SNOWFLAKE_DATABASE', 'DBT_MODELS_PRD') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'COMPUTE_WH_PRD') }}"
+      schema: staging
+      private_key_path: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PATH', '/snowflake_dbt.pem') }}"
+      threads: 16
+      client_session_keep_alive: True
+      connect_retries: 3
+      connect_timeout: 30
+      retry_on_database_errors: True
+      retry_all: False
+      reuse_connections: True
+
+    # Legacy 'pro' profile for backward compatibility during migration
     pro:
       type: snowflake
       account: so85363.west-europe.azure
-
       user: LUCAS
       private_key_path: /snowflake_dbt.pem
-
       role: ACCOUNTADMIN
       database: DBT_MODELS
       warehouse: COMPUTE_WH
@@ -33,5 +66,5 @@ tpch_transform:
       connect_retries: 0
       connect_timeout: 10
       retry_on_database_errors: False
-      retry_all: False 
+      retry_all: False
       reuse_connections: False

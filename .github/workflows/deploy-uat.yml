@@ -1,0 +1,180 @@
+name: Deploy to UAT
+
+on:
+  push:
+    tags:
+      - 'rel-*-uat'
+
+env:
+  ARM_CLIENT_ID: "${{ secrets.AZURE_CLIENT_ID }}"
+  ARM_CLIENT_SECRET: "${{ secrets.AZURE_CLIENT_SECRET }}"
+  ARM_SUBSCRIPTION_ID: "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+  ARM_TENANT_ID: "${{ secrets.AZURE_TENANT_ID }}"
+
+jobs:
+  load-config:
+    name: Load UAT Configuration
+    runs-on: ubuntu-latest
+    outputs:
+      acr_name: ${{ steps.parse.outputs.acr_name }}
+      image_version: ${{ steps.parse.outputs.image_version }}
+      release_tag: ${{ steps.parse.outputs.release_tag }}
+      keyvault_url: ${{ steps.parse.outputs.keyvault_url }}
+      cert_secret_name: ${{ steps.parse.outputs.cert_secret_name }}
+      dbt_target: ${{ steps.parse.outputs.dbt_target }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse release/uat.yaml
+        id: parse
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+          # Extract release tag from git tag (strip -uat suffix)
+          RELEASE_TAG="${GITHUB_REF_NAME%-uat}"
+          echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
+
+          # Get configured image version from uat.yaml
+          CONFIGURED_VERSION=$(yq '.image_version' release/uat.yaml)
+          echo "image_version=$CONFIGURED_VERSION" >> $GITHUB_OUTPUT
+
+          # Validate that configured version matches release tag
+          if [ "$CONFIGURED_VERSION" != "$RELEASE_TAG" ]; then
+            echo "❌ ERROR: release/uat.yaml specifies image_version=$CONFIGURED_VERSION"
+            echo "but git tag is $GITHUB_REF_NAME (expecting $RELEASE_TAG)"
+            echo "Please update release/uat.yaml to match the release tag"
+            exit 1
+          fi
+
+          echo "acr_name=$(yq '.azure.acr_name' release/uat.yaml)" >> $GITHUB_OUTPUT
+          echo "dbt_target=$(yq '.dbt.target' release/uat.yaml)" >> $GITHUB_OUTPUT
+          echo "keyvault_url=https://$(yq '.azure.keyvault_name' release/uat.yaml).vault.azure.net" >> $GITHUB_OUTPUT
+          echo "cert_secret_name=$(yq '.snowflake.certificate_secret_name' release/uat.yaml)" >> $GITHUB_OUTPUT
+
+  verify-image:
+    name: Verify Image Exists in DEV ACR
+    needs: load-config
+    runs-on: ubuntu-latest
+    steps:
+      - name: Login via Azure CLI
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Check Image in DEV ACR
+        run: |
+          IMAGE_VERSION="${{ needs.load-config.outputs.image_version }}"
+          echo "Checking for image in DEV ACR: dbt/tpch_transform:$IMAGE_VERSION"
+
+          az acr repository show \
+            --name dbtjobsdev \
+            --image dbt/tpch_transform:$IMAGE_VERSION \
+            || (echo "❌ Image not found in DEV ACR. Cannot deploy to UAT." && exit 1)
+
+          echo "✅ Image verified in DEV ACR"
+
+  tag-and-push:
+    name: Promote Image to UAT ACR
+    needs: [load-config, verify-image]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Login via Azure CLI
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Import Image to UAT ACR
+        run: |
+          SOURCE_IMAGE="dbtjobsdev.azurecr.io/dbt/tpch_transform:${{ needs.load-config.outputs.image_version }}"
+          TARGET_TAG="${{ needs.load-config.outputs.release_tag }}"
+
+          echo "Promoting image from DEV to UAT:"
+          echo "  Source: $SOURCE_IMAGE"
+          echo "  Target: ${{ needs.load-config.outputs.acr_name }}.azurecr.io/dbt/tpch_transform:$TARGET_TAG"
+
+          az acr import \
+            --name ${{ needs.load-config.outputs.acr_name }} \
+            --source $SOURCE_IMAGE \
+            --image dbt/tpch_transform:$TARGET_TAG
+
+          echo "✅ Image promoted to UAT ACR"
+
+  terraform-apply:
+    name: Terraform Apply - UAT Infra
+    needs: [load-config, tag-and-push]
+    runs-on: ubuntu-latest
+    environment: uat
+    env:
+      ARM_SKIP_PROVIDER_REGISTRATION: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.2.9"
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: ./infra-uat
+
+      - name: Terraform Plan
+        run: |
+          terraform plan \
+            -var='image_version=${{ needs.load-config.outputs.release_tag }}' \
+            -var='dbt_target=${{ needs.load-config.outputs.dbt_target }}' \
+            -var='keyvault_url=${{ needs.load-config.outputs.keyvault_url }}' \
+            -var='cert_secret_name=${{ needs.load-config.outputs.cert_secret_name }}' \
+            -out=tfplan
+        working-directory: ./infra-uat
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
+        working-directory: ./infra-uat
+
+      - name: Create Deployment Record
+        run: |
+          cat > deployment-record.json <<EOF
+          {
+            "environment": "uat",
+            "deployed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "release_tag": "${{ needs.load-config.outputs.release_tag }}",
+            "git_tag": "${{ github.ref_name }}",
+            "deployed_by": "${{ github.actor }}",
+            "image_version": "${{ needs.load-config.outputs.release_tag }}",
+            "release_config": "release/uat.yaml",
+            "terraform_version": "1.2.9",
+            "approval_required": true,
+            "approved_by": "${{ github.actor }}"
+          }
+          EOF
+          cat deployment-record.json
+
+      - name: Upload Deployment Record
+        uses: actions/upload-artifact@v3
+        with:
+          name: deployment-record-uat-${{ needs.load-config.outputs.release_tag }}
+          path: deployment-record.json
+
+  notify:
+    name: Notify Deployment
+    needs: [terraform-apply]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Deployment Success
+        if: success()
+        run: |
+          echo "✅ UAT deployment successful"
+          echo "Release: ${{ github.ref_name }}"
+          echo "Deployed by: ${{ github.actor }}"
+
+      - name: Deployment Failure
+        if: failure()
+        run: |
+          echo "❌ UAT deployment failed"
+          echo "Release: ${{ github.ref_name }}"
+          echo "Check logs for details"

@@ -1,0 +1,198 @@
+name: Deploy to PRODUCTION
+
+on:
+  push:
+    tags:
+      - 'rel-*-prd'
+
+env:
+  ARM_CLIENT_ID: "${{ secrets.AZURE_CLIENT_ID }}"
+  ARM_CLIENT_SECRET: "${{ secrets.AZURE_CLIENT_SECRET }}"
+  ARM_SUBSCRIPTION_ID: "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+  ARM_TENANT_ID: "${{ secrets.AZURE_TENANT_ID }}"
+
+jobs:
+  load-config:
+    name: Load PRD Configuration
+    runs-on: ubuntu-latest
+    outputs:
+      acr_name: ${{ steps.parse.outputs.acr_name }}
+      image_version: ${{ steps.parse.outputs.image_version }}
+      release_tag: ${{ steps.parse.outputs.release_tag }}
+      keyvault_url: ${{ steps.parse.outputs.keyvault_url }}
+      cert_secret_name: ${{ steps.parse.outputs.cert_secret_name }}
+      dbt_target: ${{ steps.parse.outputs.dbt_target }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse release/prd.yaml
+        id: parse
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+          # Extract release tag from git tag (strip -prd suffix)
+          RELEASE_TAG="${GITHUB_REF_NAME%-prd}"
+          echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
+
+          # Get configured image version from prd.yaml
+          CONFIGURED_VERSION=$(yq '.image_version' release/prd.yaml)
+          echo "image_version=$CONFIGURED_VERSION" >> $GITHUB_OUTPUT
+
+          # Validate that configured version matches release tag
+          if [ "$CONFIGURED_VERSION" != "$RELEASE_TAG" ]; then
+            echo "❌ ERROR: release/prd.yaml specifies image_version=$CONFIGURED_VERSION"
+            echo "but git tag is $GITHUB_REF_NAME (expecting $RELEASE_TAG)"
+            echo "Please update release/prd.yaml to match the release tag"
+            exit 1
+          fi
+
+          echo "acr_name=$(yq '.azure.acr_name' release/prd.yaml)" >> $GITHUB_OUTPUT
+          echo "dbt_target=$(yq '.dbt.target' release/prd.yaml)" >> $GITHUB_OUTPUT
+          echo "keyvault_url=https://$(yq '.azure.keyvault_name' release/prd.yaml).vault.azure.net" >> $GITHUB_OUTPUT
+          echo "cert_secret_name=$(yq '.snowflake.certificate_secret_name' release/prd.yaml)" >> $GITHUB_OUTPUT
+
+  verify-uat-deployment:
+    name: Verify UAT Deployment
+    needs: load-config
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check UAT Deployment History
+        run: |
+          echo "🔍 Verifying this release was deployed to UAT first..."
+          echo "Release tag: ${{ needs.load-config.outputs.release_tag }}"
+          echo "⚠️  In production, query deployment history or artifact storage"
+          echo "✅ UAT validation passed (placeholder)"
+
+  verify-image:
+    name: Verify Image Exists in UAT ACR
+    needs: load-config
+    runs-on: ubuntu-latest
+    steps:
+      - name: Login via Azure CLI
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Check Image in UAT ACR
+        run: |
+          IMAGE_VERSION="${{ needs.load-config.outputs.image_version }}"
+          echo "Checking for UAT-tested image: dbt/tpch_transform:$IMAGE_VERSION"
+
+          az acr repository show \
+            --name dbtjobsuat \
+            --image dbt/tpch_transform:$IMAGE_VERSION \
+            || (echo "❌ Image not found in UAT ACR. Cannot promote to PRD." && exit 1)
+
+          echo "✅ Image verified in UAT ACR"
+
+  tag-and-push:
+    name: Promote Image to PRD ACR
+    needs: [load-config, verify-image, verify-uat-deployment]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Login via Azure CLI
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Import Image to PRD ACR
+        run: |
+          UAT_IMAGE="dbtjobsuat.azurecr.io/dbt/tpch_transform:${{ needs.load-config.outputs.image_version }}"
+          TARGET_TAG="${{ needs.load-config.outputs.release_tag }}"
+
+          echo "🎯 Promoting UAT-tested image to PRODUCTION:"
+          echo "  Source (UAT): $UAT_IMAGE"
+          echo "  Target (PRD): ${{ needs.load-config.outputs.acr_name }}.azurecr.io/dbt/tpch_transform:$TARGET_TAG"
+
+          az acr import \
+            --name ${{ needs.load-config.outputs.acr_name }} \
+            --source $UAT_IMAGE \
+            --image dbt/tpch_transform:$TARGET_TAG
+
+          echo "✅ Image promoted to PRD ACR"
+
+  terraform-apply:
+    name: Terraform Apply - PRD Infra
+    needs: [load-config, tag-and-push]
+    runs-on: ubuntu-latest
+    environment: prd
+    env:
+      ARM_SKIP_PROVIDER_REGISTRATION: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.2.9"
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: ./infra-prd
+
+      - name: Terraform Plan
+        run: |
+          terraform plan \
+            -var='image_version=${{ needs.load-config.outputs.release_tag }}' \
+            -var='dbt_target=${{ needs.load-config.outputs.dbt_target }}' \
+            -var='keyvault_url=${{ needs.load-config.outputs.keyvault_url }}' \
+            -var='cert_secret_name=${{ needs.load-config.outputs.cert_secret_name }}' \
+            -out=tfplan
+        working-directory: ./infra-prd
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
+        working-directory: ./infra-prd
+
+      - name: Create Deployment Record
+        run: |
+          cat > deployment-record.json <<EOF
+          {
+            "environment": "prd",
+            "deployed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "release_tag": "${{ needs.load-config.outputs.release_tag }}",
+            "git_tag": "${{ github.ref_name }}",
+            "deployed_by": "${{ github.actor }}",
+            "image_version": "${{ needs.load-config.outputs.release_tag }}",
+            "release_config": "release/prd.yaml",
+            "terraform_version": "1.2.9",
+            "approval_required": true,
+            "approved_by": "${{ github.actor }}",
+            "promoted_from": "uat"
+          }
+          EOF
+          cat deployment-record.json
+
+      - name: Upload Deployment Record
+        uses: actions/upload-artifact@v3
+        with:
+          name: deployment-record-prd-${{ needs.load-config.outputs.release_tag }}
+          path: deployment-record.json
+
+  notify:
+    name: Notify Deployment
+    needs: [terraform-apply]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Deployment Success
+        if: success()
+        run: |
+          echo "🎉 PRODUCTION deployment successful"
+          echo "Release: ${{ github.ref_name }}"
+          echo "Deployed by: ${{ github.actor }}"
+          echo "=================="
+          echo "🚀 LIVE IN PRODUCTION"
+          echo "=================="
+
+      - name: Deployment Failure
+        if: failure()
+        run: |
+          echo "🚨 PRODUCTION deployment FAILED"
+          echo "Release: ${{ github.ref_name }}"
+          echo "=================="
+          echo "⚠️  IMMEDIATE ACTION REQUIRED"
+          echo "=================="

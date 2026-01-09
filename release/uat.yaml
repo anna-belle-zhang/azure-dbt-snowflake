@@ -1,0 +1,53 @@
+env: uat
+deployment_mode: manual
+
+# IMPORTANT: Update this with tested dev commit SHA before tagging
+image_version: rel-2026-01-09-1
+dbt_image: dbt-runner:rel-2026-01-09-1
+
+snowflake:
+  account: sf-uat.west-europe.azure
+  database: DBT_MODELS_UAT
+  warehouse: COMPUTE_WH_UAT
+  role: DBT_UAT_ROLE
+  user: DBT_UAT_USER
+  certificate_secret_name: snowflake-certificate-uat
+
+azure:
+  location: West Europe
+  resource_group: az-euw-syn-uat-pract-dbt-rg01
+  acr_name: dbtjobsuat
+  acr_sku: Basic
+  keyvault_name: secrets-aci-uat
+  keyvault_sku: standard
+  soft_delete_retention_days: 30
+  purge_protection_enabled: false
+  storage_account_name: azeuwsynuatstategsa01
+  storage_container_name: az-euw-syn-uat-tfstate-container01
+  baseline_state_key: dbt_uat_baseline.terraform.tfstate
+  infra_state_key: dbt_uat_infra.terraform.tfstate
+
+aci:
+  name: dbt-job-uat
+  cpu: 1.0
+  memory: 2
+  restart_policy: Never
+
+dbt:
+  target: uat
+  threads: 8
+  certificate_path: /snowflake_dbt.pem
+
+data_refresh:
+  uat_full_mask_from_prd: true
+  dev_sample_from_uat: true
+  full_refresh: false
+
+tags:
+  provider: az
+  region: euw
+  enterprise: syn
+  account: uat
+  environment: uat
+  managed_by: terraform
+  deployment_type: trunk-based
