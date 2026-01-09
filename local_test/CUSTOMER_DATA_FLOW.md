@@ -76,11 +76,11 @@ These silver models embody the “cleaned and standardized” layer described in
   - `source_batch_id` and `updated_at` for lineage/audit.
 - Materialized as a table tagged `gold/dimension`, representing the curated **current** customer dimension consumed downstream.
 
-### `models/gold/dim_customers_scd2.sql` (history-preserving dimension)
+### `models/gold/dim_customers_scd2.sql` (history-preserving dimension view)
 - Builds on the raw Bronze change events instead of the deduped silver view so every profile change/deactivation becomes its own row.
 - Orders events by their `effective_at` (or ingestion) timestamp and computes `valid_from`, `valid_to`, and `is_current` windows per `customer_id`.
 - Retains the same business attributes (names, country, segment, `customer_status`) along with the original `change_type`, enabling time-travel analyses and regulator-friendly audit trails.
-- Tagged as `gold/dimension/scd2` so analysts can choose between “latest only” or “full history” dimensions via dbt selectors.
+- Materialized as a view in MySQL (to avoid the zero-default restriction when creating tables with temporal columns) but tagged `gold/dimension/scd2` so analysts can choose between “latest only” or “full history” selectors.
 
 ## 7. Fact Tables and Metrics
 

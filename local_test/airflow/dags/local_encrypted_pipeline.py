@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 import subprocess
 import pandas as pd
 from pathlib import Path
+import shutil
 
 # DAG default arguments
 default_args = {
@@ -170,14 +171,17 @@ def load_to_mysql(decrypted_file: str):
 def cleanup_decrypted_files(decrypted_file: str):
     """Remove temporary decrypted files (TTL simulation)"""
     if decrypted_file and Path(decrypted_file).exists():
-        Path(decrypted_file).unlink()
+        decrypted_path = Path(decrypted_file)
+        decrypted_path.unlink()
         print(f"Deleted temporary file: {decrypted_file}")
 
         # Also delete metadata file
-        meta_file = Path(decrypted_file).with_suffix('.meta.json')
+        meta_file = decrypted_path.with_suffix('.meta.json')
         if meta_file.exists():
             meta_file.unlink()
             print(f"Deleted metadata file: {meta_file}")
+        else:
+            print(f"No decrypted metadata file found for cleanup: {meta_file}")
     else:
         print(f"No file to clean up: {decrypted_file}")
 
@@ -190,18 +194,34 @@ def archive_encrypted_file(encrypted_file: str):
         return
 
     archive_dir = Path('/mnt/e/A/azure-dbt-snowflake/local_test/data/archive')
-
-    if not archive_dir.exists():
-        print(f"Archive directory not accessible: {archive_dir}")
-        return
+    archive_dir.mkdir(parents=True, exist_ok=True)
 
     source = Path(encrypted_file)
-    if source.exists():
-        target = archive_dir / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{source.name}"
-        source.rename(target)
-        print(f"Archived: {source.name} -> {target}")
+    if not source.exists():
+        print(f"Source encrypted file not found: {encrypted_file}")
+        return
+
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    archived_target = archive_dir / f"{timestamp}_{source.name}"
+    try:
+        shutil.move(str(source), archived_target)
+        print(f"Archived encrypted file: {source.name} -> {archived_target}")
+    except Exception as exc:
+        print(f"Failed to move encrypted file {source} to archive: {exc}")
+        raise
+
+    # Move encryption metadata (if present)
+    metadata_source = source.with_suffix('.json')
+    if metadata_source.exists():
+        metadata_target = archive_dir / f"{timestamp}_{metadata_source.name}"
+        try:
+            shutil.move(str(metadata_source), metadata_target)
+            print(f"Archived metadata file: {metadata_source.name} -> {metadata_target}")
+        except Exception as exc:
+            print(f"Failed to move metadata file {metadata_source} to archive: {exc}")
+            raise
     else:
-        print(f"Source file not found: {encrypted_file}")
+        print(f"No metadata JSON found for {source.name}")
 
 
 # Define DAG

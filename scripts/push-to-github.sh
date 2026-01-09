@@ -73,7 +73,7 @@ Changes to be committed:
 Phase 1: Release Configuration Structure
   ✅ release/dev.yaml - Dev environment config (auto-deploy)
   ✅ release/uat.yaml - UAT environment config (manual deploy)
-  ✅ release/prd.yaml - Production environment config (multi-approval)
+  ✅ release/archive/prd.yaml.disabled - Production config (archived)
 
 Phase 2: DBT Configuration Updates
   ✅ tpch_transform/profiles.yml - Three parameterized profiles (dev/uat/prd)
@@ -135,8 +135,8 @@ Implement trunk-based development with environment-locked release configs
 
 ## Overview
 Transformed single-environment deployment into trunk-based development with
-three isolated environments (dev, uat, prd) using environment-locked release
-configurations.
+two isolated environments (dev, uat) using environment-locked release
+configurations. Production environment (prd) archived for future use.
 
 ## Phase 1: Release Configuration Structure
 - Created release/ directory with environment configs
@@ -157,43 +157,62 @@ configurations.
 ## Phase 3: CI/CD Workflows
 - .github/workflows/deploy-dev.yml: Auto-deploy to dev on every push to main
 - .github/workflows/deploy-uat.yml: Manual deploy to UAT on rel-*-uat tag
-- .github/workflows/deploy-prd.yml: Manual deploy to PRD on rel-*-prd tag
+- .github/workflows/archive/deploy-prd.yml.disabled: Production workflow (archived)
 - Each workflow parses release/*.yaml for environment-specific settings
-- Image promotion: dev → uat → prd with validation at each stage
+- Image promotion: dev → uat with validation
+- User-assigned managed identities for ACI containers
 
-## Phase 4: Helper Scripts
+## Phase 4: Terraform Infrastructure
+- baseline-dev/, baseline-uat/: Environment-specific baseline Terraform (ACR, Key Vault, Managed Identity)
+- infra-dev/, infra-uat/: Environment-specific application Terraform (ACI with managed identity)
+- All configurations generated from release/*.yaml files
+- User-assigned managed identities for secure Key Vault access
+
+## Phase 5: Helper Scripts
 - scripts/validate-names.sh: Validates resource naming conventions
 - scripts/check-azure-resources.sh: Checks Azure resource availability & quotas
 - scripts/create-azure-baseline.sh: Creates baseline Azure resources
+- scripts/setup-managed-identities.sh: Creates managed identities and service principals
+- scripts/generate-terraform-envs.sh: Generates environment-specific Terraform configs
+- scripts/push-to-github.sh: Commits and pushes all changes
 - scripts/README.md: Comprehensive scripts documentation
 
 ## Architecture Changes
 - Single main branch (trunk-based development)
-- Tag-based releases: rel-YYYY-MM-DD-N-{uat|prd}
+- Tag-based releases: rel-YYYY-MM-DD-N-uat
+- Two active environments (dev, uat), prd archived
 - Environment isolation:
-  - Separate Snowflake accounts (sf-dev, sf-uat, sf-prd)
-  - Separate Azure infrastructure (ACR, Key Vault, Storage per env)
+  - Separate Snowflake accounts (sf-dev, sf-uat)
+  - Separate Azure infrastructure (ACR, Key Vault, Storage, Managed Identity per env)
+  - User-assigned managed identities for secure ACI to Key Vault access
 - Audit-friendly: Every deployment traceable to release config + git tag
 
 ## Deployment Flow
 1. Developer pushes to main → Auto-deploys to dev
-2. Update release/uat.yaml with tested image → Tag rel-*-uat → Approve
-3. Update release/prd.yaml with UAT-tested image → Tag rel-*-prd → 2+ approvals
+2. Update release/uat.yaml with tested image → Tag rel-*-uat → Approve once
 
-## Cost Estimate
-- 3x ACR (Basic/Standard): ~$15-$40/month
-- 3x Key Vault (Standard): ~$5/month
-- 3x Storage Account: ~$2/month
-- 3x ACI (job-based): ~$5/month
-- Total: ~$27-$52 USD/month
+## Cost Estimate (dev + uat)
+- 2x ACR (Basic): ~$10/month
+- 2x Key Vault (Standard): ~$2/month
+- 2x Storage Account: ~$2/month
+- 2x ACI (job-based): ~$5/month
+- Total: ~$19 USD/month
+
+## Resources Created
+1. ✅ Azure baseline resources (ACR, Key Vault, Storage, Managed Identities)
+2. ✅ Terraform configurations (baseline-dev/, baseline-uat/, infra-dev/, infra-uat/)
+3. ✅ Service Principal for GitHub Actions
+4. ✅ User-assigned managed identities for ACI containers
 
 ## Next Steps (Manual)
-1. Create Terraform environment directories (baseline-{env}/, infra-{env}/)
-2. Generate Snowflake RSA keys per environment
-3. Create Snowflake resources (databases, warehouses, roles, users)
-4. Upload certificates to Key Vault
-5. Configure GitHub Secrets and Environments
-6. Deploy Terraform infrastructure
+1. Run scripts/setup-managed-identities.sh to create service principals
+2. Configure GitHub Secrets (AZURE_CREDENTIALS, ACR credentials)
+3. Create GitHub Environments (dev, uat) with protection rules
+4. Generate Snowflake RSA keys (openssl genrsa)
+5. Create Snowflake resources (databases, warehouses, roles, users)
+6. Upload certificates to Key Vault (az keyvault secret set)
+7. Deploy Terraform: cd baseline-dev && terraform init && terraform apply
+8. Test deployment flow (push to main → verify dev auto-deploy)
 
 ## References
 - Implementation plan: /root/.claude/plans/distributed-foraging-moonbeam.md
@@ -257,35 +276,38 @@ Remote: $(git remote get-url origin)
 
 What happens next:
 ------------------
-1. ⚠️  The deploy-dev.yml workflow will NOT trigger yet because:
-   - infra-dev/ directory doesn't exist yet
-   - Terraform will fail without environment-specific configs
+1. ✅ Terraform directories created (baseline-dev/, baseline-uat/, infra-dev/, infra-uat/)
+2. ✅ Workflows ready (deploy-dev.yml, deploy-uat.yml)
+3. ✅ Managed identities configured
 
-2. 📋 Complete remaining setup tasks:
+Next manual steps:
 
-   a) Create Terraform environment directories:
-      - Copy baseline/ → baseline-dev/, baseline-uat/, baseline-prd/
-      - Copy infra/ → infra-dev/, infra-uat/, infra-prd/
-      - Update backend.tf and .auto.tfvars per environment
+   a) Setup Managed Identities and GitHub Integration:
+      - Run: ./scripts/setup-managed-identities.sh
+      - Copy output to GitHub Secrets
 
    b) Configure GitHub:
-      - Settings → Secrets → Add AZURE_CREDENTIALS, ACR credentials, etc.
-      - Settings → Environments → Create dev, uat, prd with protection rules
+      - Settings → Secrets → Add AZURE_CREDENTIALS, ACR credentials
+      - Settings → Environments → Create dev (no rules), uat (1 reviewer)
 
    c) Setup Snowflake:
       - Generate RSA keys: openssl genrsa -out snowflake_dev.p8 2048
-      - Create databases, warehouses, roles, users (per environment)
-      - Upload certificates to Key Vault
+      - Create databases: DBT_MODELS_DEV, DBT_MODELS_UAT
+      - Create warehouses: COMPUTE_WH_DEV, COMPUTE_WH_UAT
+      - Create roles and users with RSA public keys
+      - Upload certificates: az keyvault secret set --vault-name secrets-aci-dev ...
 
    d) Deploy Terraform:
       - cd baseline-dev && terraform init && terraform apply
-      - cd infra-dev && terraform init && terraform apply
-      - Repeat for uat and prd
+      - cd baseline-uat && terraform init && terraform apply
+      - cd infra-dev && terraform init && terraform apply -var='image_version=latest'
+      - cd infra-uat && terraform init && terraform apply -var='image_version=rel-2026-01-09-1'
 
-3. 🚀 Test the deployment flow:
-   - Make a small change → push to main → verify dev auto-deploys
-   - Tag rel-2026-01-09-1-uat → verify UAT deployment
-   - Tag rel-2026-01-09-1-prd → verify PRD deployment with 2+ approvals
+   e) Test the deployment flow:
+      - Push to main → verify dev auto-deploys
+      - Tag rel-2026-01-09-1-uat → verify UAT deployment with approval
+
+See DEPLOYMENT_GUIDE.md for detailed step-by-step instructions.
 
 Documentation:
 --------------

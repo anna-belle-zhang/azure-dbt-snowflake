@@ -1,0 +1,23 @@
+location         = "West Europe"
+rg_name          = "az-euw-syn-uat-pract-dbt-rg01"
+aci_name         = "dbt-job-uat"
+cpu              = "1.0"
+memory           = "2"
+dbt_target       = "uat"
+keyvault_url     = "https://secrets-aci-uat.vault.azure.net"
+cert_secret_name = "snowflake-certificate-uat"
+
+tags = {
+  provider                = "az"
+  region                  = "euw"
+  enterprise              = "syn"
+  account                 = "uat"
+  system                  = "pract"
+  environment             = "uat"
+  cmdb_name               = "dbt-pipeline-uat"
+  security_exposure_level = "MZ"
+  status                  = "active"
+  on_service              = "yes"
+  managed_by              = "terraform"
+  deployment_type         = "trunk-based"
+}
